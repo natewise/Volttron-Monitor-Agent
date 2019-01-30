@@ -12,6 +12,8 @@ import sys
 import socket
 import json
 import time
+import ssl
+import os.path
 from volttron.platform.agent import utils
 from volttron.platform.vip.agent import Agent, Core, PubSub, compat, RPC
 
@@ -115,6 +117,13 @@ class Monitor(Agent):
         _log.info("Listening on " + str(addr))
         self.client = self.s.accept()
         _log.info("Connection from addr " + str(self.client[1]) + "!")
+        
+        path = os.path.dirname(os.path.abspath(__file__))
+        self.context = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
+        self.context.load_cert_chain(certfile=os.path.join(path,"../../../../../ssl/","volttronoutput.crt"), keyfile=os.path.join(path,"../../../../../ssl/","volttronoutput.key"))
+        
+        self.secure_sock = self.context.wrap_socket(self.client[0], server_side=True)                               
+        
         #count = -1
         #while True: 
         #    count = count + 1
@@ -126,11 +135,14 @@ class Monitor(Agent):
     
     @PubSub.subscribe('pubsub', 'heartbeat')
     def on_match(self, peer, sender, bus, topic, headers, message):
-        self.client[0].send(json.dumps({"topic":topic, "peer":peer, 
-                                        "sender":sender, "message":message, 
-                                        "headers":headers}))
-        _log.info("Heartbeat!! Inside monitor agent")
-    
+        try:
+            self.secure_sock.send(json.dumps({"topic":topic, "peer":peer, "sender":sender, "message":message, "headers":headers}))
+            #_log.info("Heartbeat!! Inside monitor agent")
+        except:
+            _log.warning("Lost connection to clients. Waiting for another connection...")
+            self.client = self.s.accept()
+            
+        
     @Core.receiver("onstart")
     def onstart(self, sender, **kwargs):
         """
